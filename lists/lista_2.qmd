@@ -44,8 +44,20 @@ from torch.utils.data import TensorDataset, DataLoader
 # modulo para acompanhar progresso das redes neurais
 from tqdm import tqdm
 
-# modulos do sklearn para calibração
-# TODO: adicionar depois quando for fazer exercicio 2
+# modulos do sklearn para calibração e classificação
+# modelos de classificação
+from sklearn.linear_model import LogisticRegressionCV
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.neighbors import KNeighborsClassifier
+
+# metricas
+from sklearn.metrics import brier_score_loss, log_loss
+
+# calibracao: platt scaling, reg isotonica e calibration plot
+from sklearn.calibration import CalibratedClassifierCV, calibration_curve, CalibrationDisplay
+
+# histogram binning
+from calibration_module.calibrator import HistogramCalibrator
 ```
 
 \section{Exercício 1}
@@ -596,4 +608,439 @@ ks_df
 ```
 Pelos p-valores apresentados na tabela acima, assim como também pelos valores das estatísticas KS, temos evidências de que o modelo de densidade condicional baseado em mistura de normais esteja bem calibrado, com seus respectivos pit-values seguindo de forma muito próxima uma distribuição uniforme. Já modelos obtidos via FlexCode e Normalizing Flows estão descalibrados, com ambas metodologias aprensetando p-valores muito pequenos juntamente com uma estatística KS razoavelmente grande.
 
+\section{Exercício 2}
+Primeiramente, importaremos o banco de dados utilizado:
+```{python}
+# importando os dados
+credit_card_data = pd.read_excel("data/default_of_credit_card_clients.xls",
+header = 1).drop("ID", axis = 1)
+# visualizando numero de variaveis, observações e tipo de cada variavel
+credit_card_data.info()
+```
+A seguir, transformaremos as variáveis categóricas em dummies e separaremos a variavel resposta $y$ da matriz de covariáveis $X$:
+```{python}
+# obtendo variavel resposta y
+y = credit_card_data.loc[:, "default payment next month"].values
+
+# covariaveis categoricas
+# PAY strings
+pay_str = [col for col in credit_card_data if (
+    (col.startswith('PAY'))& ("AMT" not in col))]
+
+cat_cols = ["SEX", "EDUCATION", "MARRIAGE"] + pay_str
+
+# retirando ID e utilizando one-hot encoding em covariaveis categoricas
+credit_card_filtered = pd.get_dummies(
+    credit_card_data.drop(
+    ["default payment next month"], 
+    axis = 1),
+    columns = cat_cols, 
+    drop_first = True,
+    dtype=float
+    )
+# obtendo matriz de covariaveis
+X = credit_card_filtered.values
+```
+
+Com isso feito, dividiremos o conjunto de dados em treino/calibragem e teste, utilizando-se $90\%$ para treino e calibragem e $10\%$ para teste:
+```{python}
+# separando os dados em treino+calibragem e teste
+X_train_val, X_test, y_train_val, y_test = (
+    train_test_split(
+    X, 
+    y,
+    test_size=0.1, 
+    random_state=145)
+    )
+```
+A seguir, diviremos o conjunto de treino e calibragem em $70\%$ treino e $30\%$ calibragem, tendo:
+```{python}
+X_tr, X_cal, y_tr, y_cal = (
+    train_test_split(
+    X_train_val, 
+    y_train_val,
+    test_size=0.3, 
+    random_state=75)
+    )
+
+# padronizando os dados para o KNN
+# criando o scaler
+scaler = StandardScaler()
+
+# ajustando o scaler aos dados de treino
+scaler.fit(X_tr)
+
+# Padronizando todas as matrizes de covariaveis
+X_tr_scaled = scaler.transform(X_tr)
+X_cal_scaled = scaler.transform(X_cal)
+X_test_scaled = scaler.transform(X_test)
+```
+Com os dados divididos em conjuntos de treino, calibragem e teste, podemos primeiramente ajustar os diferentes modelos de classificação considerados e compara-los em termos do score de brier e log-loss:
+\subsection{Item 1}
+Ajustaremos a seguir os três modelos de classificação:
+```{python}
+# logistica com penalizacao lasso escolhida via validacao cruzada
+logistic_clf = LogisticRegressionCV(
+    cv=5,
+    random_state=19,
+    solver="saga",
+    penalty="l1",
+    scoring="neg_log_loss",
+    max_iter=500,
+).fit(X_tr_scaled, y_tr)
+
+# KNN com K = 30
+knn_clf = KNeighborsClassifier(n_neighbors=30).fit(X_tr_scaled, y_tr)
+
+# Random Forest com 300 arvores, criterio dado pela log-loss e
+# profundidade maxima de 10
+rf_clf = RandomForestClassifier(
+    n_estimators=300, criterion="log_loss", max_depth=10, random_state=15
+).fit(X_tr, y_tr)
+```
+Agora, computaremos o score de brier e a log-loss para cada método no conjunto de teste, tendo a tabela:
+```{python}
+# calculando score de brier
+logis_brier, knn_brier, rf_brier = (
+    brier_score_loss(
+    y_test, 
+    logistic_clf.predict_proba(X_test_scaled)[:, 1]
+    ),
+    brier_score_loss(
+    y_test, 
+    knn_clf.predict_proba(X_test_scaled)[:, 1] 
+    ),
+    brier_score_loss(
+    y_test, 
+    rf_clf.predict_proba(X_test_scaled)[:, 1]
+    )
+)
+
+# computando log-loss
+logis_ll, knn_ll, rf_ll = (
+    log_loss(
+    y_test, 
+    logistic_clf.predict_proba(X_test_scaled)
+    ),
+    log_loss(
+    y_test, 
+    knn_clf.predict_proba(X_test_scaled) 
+    ),
+    log_loss(
+    y_test, 
+    rf_clf.predict_proba(X_test_scaled)
+    )
+)
+
+# tabela com cada risco
+results = pd.DataFrame({
+    'Logistica': [f"{logis_brier:.4f}",
+    f"{logis_ll:.4f}"],
+    'KNN':[f"{knn_brier:.4f}",
+    f"{knn_ll:.4f}"],
+    'RF':[f"{rf_brier:.4f}",
+    f"{rf_ll:.4f}"]
+})
+
+# Transpose the DataFrame
+results_transposed = results.T
+results_transposed.columns = ['Score de brier', 'Log-Verossimilhança']
+results_transposed
+```
+
+\subsection{Item 2}
+A seguir, podemos analisar o calibration plot de cada metodologia através da Figura:
+```{python}
+# | label: fig-calibration-plot
+# | fig-cap: "Calibration plot dos métodos de classificação ajustados"
+# | fig-align: center
+# | fig-height: 10
+# | fig-width: 10
+# | echo: false
+from matplotlib.gridspec import GridSpec
+
+colors = plt.get_cmap("Dark2")
+markers = ["v", "s", "o"]
+
+gs = GridSpec(4, 2)
+fig = plt.figure(figsize=(10, 10))
+# Creating subplots for each calibration plot
+ax1 = fig.add_subplot(gs[0, 0])
+ax2 = fig.add_subplot(gs[0, 1])
+ax3 = fig.add_subplot(gs[1, 0])
+
+# Plotting each calibration plot in separate panels
+CalibrationDisplay.from_estimator(
+    logistic_clf,
+    X_test_scaled,
+    y_test,
+    n_bins=20,
+    name="Regressão Logística",
+    ax=ax1,
+    color=colors(0),
+    marker=markers[0],
+)
+ax1.set_xlabel("")
+ax1.set_ylabel("")
+ax1.set_title("Regressão Logística")
+ax1.grid()
+
+CalibrationDisplay.from_estimator(
+    knn_clf,
+    X_test_scaled,
+    y_test,
+    n_bins=20,
+    name="KNN",
+    ax=ax2,
+    color=colors(1),
+    marker=markers[1],
+)
+ax2.set_xlabel("")
+ax2.set_ylabel("")
+ax2.set_title("KNN")
+ax2.grid()
+
+CalibrationDisplay.from_estimator(
+    rf_clf,
+    X_test,
+    y_test,
+    n_bins=20,
+    name="Random Forest",
+    ax=ax3,
+    color=colors(2),
+    marker=markers[2],
+)
+ax3.set_xlabel("")
+ax3.set_ylabel("")
+ax3.set_title("Random Forest")
+ax3.grid()
+# Adding common x and y labels for the entire figure
+fig.text(0.5, 0.45, "Probabilidade prevista", ha="center", va="center", fontsize=14)
+fig.text(
+    -0.025,
+    0.75,
+    "Frequência observada",
+    ha="center",
+    va="center",
+    rotation="vertical",
+    fontsize=14,
+)
+plt.tight_layout()
+# Adding a single legend for all plots
+handles, labels = [], []
+for ax in [ax1, ax2, ax3]:
+    h, l = ax.get_legend_handles_labels()
+    handles.extend(h)
+    labels.extend(l)
+
+# Removing duplicate labels
+unique_labels = dict(
+    zip(
+        [
+            label.replace("Perfectly calibrated", "Perfeitamente calibrado")
+            for label in labels
+        ],
+        handles,
+    )
+)
+fig.legend(
+    unique_labels.values(),
+    unique_labels.keys(),
+    loc="upper center",
+    bbox_to_anchor=(0.5, 1.05),
+    ncol=3,
+)
+for ax in [ax1, ax2, ax3]:
+    ax.legend().set_visible(False)
+plt.show()
+```
+
+
+\subsection{Item 3}
+Vamos a seguir recalibrar cada método via histogram binning. Para tal, ajustaremos cada método ao histogram binning no conjunto de calibragem separado inicialmente, tendo:
+```{python}
+hist_logis, hist_knn, hist_rf = (
+    HistogramCalibrator(n_bins=20),
+    HistogramCalibrator(n_bins=20),
+    HistogramCalibrator(n_bins=20),
+)
+
+# predicoes no conjunto de calibracao
+logis_cal, knn_cal, rf_cal = (
+    logistic_clf.predict_proba(X_cal_scaled)[:, 1],
+    knn_clf.predict_proba(X_cal_scaled)[:, 1],
+    rf_clf.predict_proba(X_cal)[:, 1],
+)
+
+# ajustando via histogram binning e avaliando os calibration plots
+hist_logis.fit(logis_cal, y_cal)
+hist_knn.fit(knn_cal, y_cal)
+hist_rf.fit(rf_cal, y_cal)
+```
+Podemos então visualizar o calibration plot das probabilidades recalibradas no conjunto de teste a partir da [Figura @fig-calibration-plot-recalibrated]:
+```{python}
+# | label: fig-calibration-plot-recalibrated
+# | fig-cap: "Calibration plot dos métodos de classificação recalibrados"
+# | fig-align: center
+# | fig-height: 10
+# | fig-width: 10
+# | echo: false
+from matplotlib.gridspec import GridSpec
+colors = plt.get_cmap("Dark2")
+markers = ["v", "s", "o"]
+
+gs = GridSpec(4, 2)
+fig = plt.figure(figsize=(10, 10))
+# Creating subplots for each calibration plot
+ax1 = fig.add_subplot(gs[0, 0])
+ax2 = fig.add_subplot(gs[0, 1])
+ax3 = fig.add_subplot(gs[1, 0])
+
+logis_pred = logistic_clf.predict_proba(X_test_scaled)[:, 1]
+cal_prob_logis = hist_logis.predict(logis_pred)
+
+CalibrationDisplay.from_predictions(
+    y_test,
+    cal_prob_logis,
+    n_bins=20,
+    name="Regressão Logística",
+    ax=ax1,
+    color=colors(0),
+    marker=markers[0],
+)
+ax1.set_xlabel("")
+ax1.set_ylabel("")
+ax1.set_title("Regressão Logística recalibrada")
+ax1.grid()
+
+
+knn_pred = knn_clf.predict_proba(X_test_scaled)[:, 1]
+cal_prob_knn = hist_knn.predict(knn_pred)
+
+CalibrationDisplay.from_predictions(
+    y_test,
+    cal_prob_knn,
+    n_bins=20,
+    name="KNN",
+    ax=ax2,
+    color=colors(1),
+    marker=markers[1],
+)
+ax2.set_xlabel("")
+ax2.set_ylabel("")
+ax2.set_title("KNN recalibrado")
+ax2.grid()
+
+
+rf_pred = rf_clf.predict_proba(X_test)[:, 1]
+cal_prob_rf = hist_rf.predict(rf_pred)
+CalibrationDisplay.from_predictions(
+    y_test,
+    cal_prob_rf,
+    n_bins=20,
+    name="Random Forest",
+    ax=ax3,
+    color=colors(2),
+    marker=markers[2],
+)
+ax3.set_xlabel("")
+ax3.set_ylabel("")
+ax3.set_title("Random Forest recalibrado")
+ax3.grid()
+
+# Adding common x and y labels for the entire figure
+fig.text(0.5, 0.45, "Probabilidade prevista", ha="center", va="center", fontsize=14)
+fig.text(
+    -0.025,
+    0.75,
+    "Frequência observada",
+    ha="center",
+    va="center",
+    rotation="vertical",
+    fontsize=14,
+)
+plt.tight_layout()
+# Adding a single legend for all plots
+handles, labels = [], []
+for ax in [ax1, ax2, ax3]:
+    h, l = ax.get_legend_handles_labels()
+    handles.extend(h)
+    labels.extend(l)
+
+# Removing duplicate labels
+unique_labels = dict(
+    zip(
+        [
+            label.replace("Perfectly calibrated", "Perfeitamente calibrado")
+            for label in labels
+        ],
+        handles,
+    )
+)
+fig.legend(
+    unique_labels.values(),
+    unique_labels.keys(),
+    loc="upper center",
+    bbox_to_anchor=(0.5, 1.05),
+    ncol=3,
+)
+for ax in [ax1, ax2, ax3]:
+    ax.legend().set_visible(False)
+plt.show()
+```
+Percebemos que todos os métodos estão razoavelmente mais calibrados que as versões originais, havendo principal destaque para a regressão logística e random forest, que tem suas curvas de calibração muito próximas da reta do modelo perfeitamente calibrado.
+
+\subsection{Item 4}
+Recalcularemos com base nas recalibrações dos métodos as perdas do score de brier e log-loss, tendo:
+```{python}
+# calculando score de brier para probabilidades recalibradas
+logis_pred = logistic_clf.predict_proba(X_test_scaled)[:, 1]
+cal_prob_logis = hist_logis.predict(logis_pred)
+
+knn_pred = knn_clf.predict_proba(X_test_scaled)[:, 1]
+cal_prob_knn = hist_knn.predict(knn_pred)
+
+rf_pred = rf_clf.predict_proba(X_test)[:, 1]
+cal_prob_rf = hist_rf.predict(rf_pred)
+
+logis_brier_cal, knn_brier_cal, rf_brier_cal = (
+    brier_score_loss(y_test, cal_prob_logis),
+    brier_score_loss(y_test, cal_prob_knn),
+    brier_score_loss(y_test, cal_prob_rf),
+)
+
+# elaborando uma matriz de predicoes
+neg_cal_prob_logis = 1 - cal_prob_logis
+neg_cal_prob_knn = 1 - cal_prob_knn
+neg_cal_prob_rf = 1 - cal_prob_rf
+
+# concatenando ambas probs
+logis_prob_cal, knn_prob_cal, rf_prob_cal = (
+    np.stack((neg_cal_prob_logis, cal_prob_logis), axis=1),
+    np.stack((neg_cal_prob_knn, cal_prob_knn), axis=1),
+    np.stack((neg_cal_prob_rf, cal_prob_rf), axis=1),
+)
+
+# computando log-loss
+logis_ll_cal, knn_ll_cal, rf_ll_cal = (
+    log_loss(y_test, logis_prob_cal),
+    log_loss(y_test, knn_prob_cal),
+    log_loss(y_test, rf_prob_cal),
+)
+
+# tabela com cada risco
+results = pd.DataFrame(
+    {
+        "Logistica": [f"{logis_brier_cal:.4f}", f"{logis_ll_cal:.4f}"],
+        "KNN": [f"{knn_brier_cal:.4f}", f"{knn_ll_cal:.4f}"],
+        "RF": [f"{rf_brier_cal:.4f}", f"{rf_ll_cal:.4f}"],
+    }
+)
+
+# Transpose the DataFrame
+results_transposed = results.T
+results_transposed.columns = ["Score de brier", "Log-Verossimilhança"]
+results_transposed
+```
+Em geral, nota-se uma ligeira melhora de performance em todos os métodos, tendo tanto o score de brier quanto a log-loss menores valores considerando-se os desempenhos inciais dos métodos pré-calibração.
 
