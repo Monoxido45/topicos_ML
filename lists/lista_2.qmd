@@ -54,14 +54,18 @@ from sklearn.neighbors import KNeighborsClassifier
 from sklearn.metrics import brier_score_loss, log_loss
 
 # calibracao: platt scaling, reg isotonica e calibration plot
-from sklearn.calibration import CalibratedClassifierCV, calibration_curve, CalibrationDisplay
+from sklearn.calibration import (
+    CalibratedClassifierCV,
+    calibration_curve,
+    CalibrationDisplay,
+)
 
 # histogram binning
 from calibration_module.calibrator import HistogramCalibrator
 ```
 
 \section{Exercício 1}
-Para o Exercício 1, consideraremos o banco de dados de propriedade físico-químicas de Proteínas que pode ser encontrado no repositório de Machine Learning UCI [link](https://archive.ics.uci.edu/dataset/265/physicochemical+properties+of+protein+tertiary+structure):
+Para o Exercício 1, consideraremos o banco de dados de propriedade físico-químicas de Proteínas que pode ser encontrado no repositório de Machine Learning [UCI](https://archive.ics.uci.edu/dataset/265/physicochemical+properties+of+protein+tertiary+structure):
 ```{python}
 # importando os dados
 protein_data = pd.read_csv("data/CASP.csv")
@@ -69,20 +73,25 @@ protein_data = pd.read_csv("data/CASP.csv")
 protein_data.info()
 ```
 
-A variável resposta considerada nesse problema é a variável RMSD, que quantifica o tamanho dos resíduos. Assim, temos interesse em modelar a incerteza aleatórica de RMSD em função das outras variáveis que nos dão diferentes características de cada proteina. Nota-se que todas as covariáveis consideradas são quantitativas, tendo apenas uma delas como discreta (F8). Como o conjunto de dados contém 45730 observações, separaremos o conjunto em $90\%$ treino e validação e $10\%$ para teste, já que assim conguimos destinar uma parcela considerável dos dados para ajuste dos diferentes modelos ao passo que conseguimos boas estimativas para as perdas e PIT-values. 
+A variável resposta considerada nesse problema é a variável RMSD. Assim, temos interesse em modelar a incerteza aleatórica de RMSD em função das outras variáveis que nos dão diferentes características de cada proteina. Nota-se que todas as covariáveis consideradas são quantitativas, tendo apenas uma delas como discreta (F8). Como o conjunto de dados contém 45730 observações, separaremos o conjunto em $90\%$ treino e validação e $10\%$ para teste, já que assim conguimos destinar uma parcela considerável dos dados para ajuste dos diferentes modelos ao passo que conseguimos boas estimativas para as perdas e PIT-values. 
 ```{python}
 # separando os dados em treino+validação e teste
 train_val_data, test_data = train_test_split(protein_data, test_size=0.1, random_state=42)
 # tamanho do conjunto de treino
-train_val_data.shape[0]
+print(f"Tamanho do conjunto de treino e validação {train_val_data.shape[0]}")
+print(f"Tamanho do conjunto de teste{test_data.shape[0]}")
 ```
 Já, para o treinamento e validação, consideraremos uma divisão de $70\%$ para treino e $30\%$ para validação:
 
 ```{python}
 # separando os dados em treino+validação e teste
-train_data, valid_data = train_test_split(train_val_data, test_size=0.3, random_state=125)
+train_data, valid_data = train_test_split(
+    train_val_data, test_size=0.3, random_state=125
+)
 # tamanho do conjunto de treino
 train_data.shape[0]
+print(f"Tamanho do conjunto de treino {train_data.shape[0]}")
+print(f"Tamanho do conjunto de validação{valid_data.shape[0]}")
 ```
 
 ```{python}
@@ -137,7 +146,7 @@ train_loader, valid_loader = (
 \subsection{Item 1}
 Implementaremos a seguir os diversos métodos, avaliando também a curva de aprendizado de cada:
 
-* Mistura de Normais via rede neural
+* Mistura de Normais via rede neural:
 
 Primeiro definiremos os parâmetros do modelo de mistura, a arquitetura e otimizador da rede. Fixaremos um total de 10 componentes de mistura e consideraremos um total de 50 neurônios nas duas camadas intermediarias da rede.
 ```{python}
@@ -227,12 +236,12 @@ desc="Ajustando o rede neural de mistura de normais"):
 ```
 Podemos visualizar a curva de aprendizado da rede:
 ```{python}
-#| label: fig-learning-curve-mixture-net
-#| fig-cap: "Curva de aprendizado do modelo de mistura de Normais"
-#| fig-align: center
-#| fig-height: 4
-#| fig-width: 6
-#| echo: false
+# | label: fig-learning-curve-mixture-net
+# | fig-cap: "Curva de aprendizado do modelo de mistura de Normais"
+# | fig-align: center
+# | fig-height: 4
+# | fig-width: 6
+# | echo: false
 plt.plot(np.array(avg_loss_train_list), color="tab:red", label="Perda no treino")
 plt.plot(np.array(avg_loss_val_list), color="tab:blue", label="Perda na validação")
 plt.legend()
@@ -241,7 +250,8 @@ plt.ylabel("Entropria Cruzada")
 plt.title("Curva de aprendizado")
 plt.show()
 ```
-* Normalizing flows
+
+* Normalizing flows:
 
 Definindo primeiro a arquitetura do modelo:
 ```{python}
@@ -360,7 +370,8 @@ plt.title("Curva de aprendizado")
 plt.show()
 ```
 
-* FlexCode
+* FlexCode:
+
 Para o flexcode, consideraremos a floresta aleatória como algoritmo de regressão para o ajuste de cada coeficiente da combinação linear das funções de base. Além disso, fixaremos 5 como o máximo de funções base ortonormais, utilizando a base de cossenos:
 ```{python}
 fx_model = flexcode.FlexCodeModel(RandomForest, max_basis=5, basis_system="cosine")
@@ -371,17 +382,18 @@ fx_model.tune(X_valid, y_valid)
 ```
 
 Obteremos agora as estimativas de densidades condicionais para as observações do conjunto de teste, juntamente com a estimativa da log-verossimilhança negativa dos valores observados:
-* Modelo de Mistura
+
+* Modelo de Mistura:
 ```{python}
 # estimativa de densidade via Modelo de Mistura
-# obtendo estimativas do vetor de probabilidade, vetor de medias e 
+# obtendo estimativas do vetor de probabilidade, vetor de medias e
 # matriz de covariancias de cada grupo
 mx_model.eval()
 log_pi, mu, sigma = mx_model.forward(X_test_t)
 
-log_pi=log_pi.detach().numpy()
-mu_mat=mu.detach().numpy().reshape(mu.size()[0],mu.size()[1])
-sigma_mat=sigma.detach().numpy().reshape(mu.size()[0],mu.size()[1])
+log_pi = log_pi.detach().numpy()
+mu_mat = mu.detach().numpy().reshape(mu.size()[0], mu.size()[1])
+sigma_mat = sigma.detach().numpy().reshape(mu.size()[0], mu.size()[1])
 
 y_grid = np.linspace(0, np.max(y_train), 1000)
 
@@ -398,19 +410,22 @@ for i in range(mu.size()[0]):
     aux_log_pi = log_pi[i, :]
 
     # computando densidade da normal com tais parametros em cada grupo
-    z_score = (y_grid - aux_mu[:, np.newaxis])/aux_sigma[:, np.newaxis]
-    aux_log_pi=aux_log_pi[:, np.newaxis]
-    loglik = aux_log_pi - (1/2)*z_score**2 - np.log(np.sqrt(np.pi*2)*aux_sigma[:, np.newaxis])
+    z_score = (y_grid - aux_mu[:, np.newaxis]) / aux_sigma[:, np.newaxis]
+    aux_log_pi = aux_log_pi[:, np.newaxis]
+    loglik = (
+        aux_log_pi
+        - (1 / 2) * z_score**2
+        - np.log(np.sqrt(np.pi * 2) * aux_sigma[:, np.newaxis])
+    )
 
     # juntando tudo nos resultados
     results[i, :, :] = np.exp(loglik)
 
     # computando densidade da normal para o valor de y_test
-    z_score = (y_test[i] - aux_mu)/aux_sigma
+    z_score = (y_test[i] - aux_mu) / aux_sigma
     aux_log_pi = log_pi[i, :]
     loglik_test = np.exp(
-        aux_log_pi - (1/2)*z_score**2 - 
-        np.log(np.sqrt(np.pi*2)*aux_sigma)
+        aux_log_pi - (1 / 2) * z_score**2 - np.log(np.sqrt(np.pi * 2) * aux_sigma)
     )
     res_log_loss[i] = np.log(np.sum(loglik_test))
 
@@ -419,10 +434,7 @@ for i in range(mu.size()[0]):
 densities_mx = np.sum(results, axis=1)
 
 # estimando log-loss
-mx_log_loss = [
-    -np.mean(res_log_loss), 
-    np.std(res_log_loss)/np.sqrt(X_test.shape[0])
-    ]
+mx_log_loss = [-np.mean(res_log_loss), np.std(res_log_loss) / np.sqrt(X_test.shape[0])]
 ```
 
 * Normalizing flows
@@ -655,6 +667,7 @@ X_train_val, X_test, y_train_val, y_test = (
 ```
 A seguir, diviremos o conjunto de treino e calibragem em $70\%$ treino e $30\%$ calibragem, tendo:
 ```{python}
+# dividindo o conjunto em treino e calibração
 X_tr, X_cal, y_tr, y_cal = (
     train_test_split(
     X_train_val, 
@@ -679,14 +692,15 @@ Com os dados divididos em conjuntos de treino, calibragem e teste, podemos prime
 \subsection{Item 1}
 Ajustaremos a seguir os três modelos de classificação:
 ```{python}
-# logistica com penalizacao lasso escolhida via validacao cruzada
+# | cache: True
+# logistica com penalização lasso
 logistic_clf = LogisticRegressionCV(
     cv=5,
     random_state=19,
     solver="saga",
     penalty="l1",
     scoring="neg_log_loss",
-    max_iter=500,
+    max_iter=250,
 ).fit(X_tr_scaled, y_tr)
 
 # KNN com K = 30
@@ -854,7 +868,6 @@ for ax in [ax1, ax2, ax3]:
     ax.legend().set_visible(False)
 plt.show()
 ```
-
 
 \subsection{Item 3}
 Vamos a seguir recalibrar cada método via histogram binning. Para tal, ajustaremos cada método ao histogram binning no conjunto de calibragem separado inicialmente, tendo:
