@@ -1071,6 +1071,6 @@ results_transposed = results.T
 results_transposed.columns = ["Score de brier", "Log-Verossimilhança"]
 results_transposed
 ```
-Em geral, nota-se que para o Random Forest e KNN  melhora de performance com menores valores para o Score de Brier e log-loss considerando-se os desempenhos inciais dos métodos pré-calibração. A Regressão Logística teve ligeiro redução no seu desempenho em relação a pré-calibração, possivelmente devido a distribuição das probabilidades mais longe do valor $1$ após a calibragem.
+Em geral, nota-se que para o Random Forest e KNN  melhora de performace com menores valores para o Score de Brier e log-loss considerando-se os desempenhos inciais dos métodos pré-calibração. A Regressão Logística teve ligeiro redução no seu desempenho em relação a pré-calibração, possivelmente devido a distribuição das probabilidades mais longe do valor $1$ após a calibragem.
 Assim, o  Random Forest possui melhores valores em relação ao KNN e Regressão Logística.
 
