@@ -73,7 +73,7 @@ protein_data = pd.read_csv("data/CASP.csv")
 protein_data.info()
 ```
 
-A variável resposta considerada nesse problema é a variável RMSD. Assim, temos interesse em modelar a incerteza aleatórica de RMSD em função das outras variáveis que nos dão diferentes características de cada proteina. Nota-se que todas as covariáveis consideradas são quantitativas, tendo apenas uma delas como discreta (F8). Como o conjunto de dados contém 45730 observações, separaremos o conjunto em $90\%$ treino e validação e $10\%$ para teste, já que assim conguimos destinar uma parcela considerável dos dados para ajuste dos diferentes modelos ao passo que conseguimos boas estimativas para as perdas e PIT-values. 
+A variável resposta considerada nesse problema é a variável RMSD. Assim, temos interesse em modelar a incerteza aleatórica de RMSD em função das outras variáveis que nos dão diferentes características de cada proteina. Nota-se que todas as covariáveis consideradas são quantitativas, tendo apenas uma delas como discreta (F8). Como o conjunto de dados contém 45730 observações, separaremos o conjunto em $90\%$ treino e validação e $10\%$ para teste, já que assim, conseguimos destinar uma parcela considerável dos dados para ajuste dos diferentes modelos ao passo que alcançamos boas estimativas para as perdas e PIT-values. 
 ```{python}
 # separando os dados em treino+validação e teste
 train_val_data, test_data = train_test_split(protein_data, test_size=0.1, random_state=42)
@@ -93,6 +93,8 @@ train_data.shape[0]
 print(f"Tamanho do conjunto de treino {train_data.shape[0]}")
 print(f"Tamanho do conjunto de validação{valid_data.shape[0]}")
 ```
+
+Além disso, os dados foram transformados do dataframe do pandas para arrays do numpy, e na sequência a matriz de covariáveis foi padronizada. Para serem utilizados como entradas na rede neural os arrays foram transformados em torch.tensor e separados em batch de tamanho $350$ no teste e $150$ na validação.
 
 ```{python}
 torch.manual_seed(167)
@@ -148,7 +150,7 @@ Implementaremos a seguir os diversos métodos, avaliando também a curva de apre
 
 * Mistura de Normais via rede neural:
 
-Primeiro definiremos os parâmetros do modelo de mistura, a arquitetura e otimizador da rede. Fixaremos um total de 10 componentes de mistura e consideraremos um total de 50 neurônios nas duas camadas intermediarias da rede.
+Primeiro definiremos os parâmetros do modelo de mistura, a arquitetura e o otimizador da rede. Fixaremos um total de 10 componentes de mistura e consideraremos um total de 50 neurônios nas duas camadas intermediarias da rede.
 ```{python}
 # ajustando a rede de misturas
 n_epochs = 500
@@ -250,6 +252,9 @@ plt.ylabel("Entropria Cruzada")
 plt.title("Curva de aprendizado")
 plt.show()
 ```
+
+Podemos observar no gráfico das curvas de aprendizado da rede que a convergência ocorre rapidamente após poucas épocas, e a perda no treino e na validação possuem comportamento semelhante.
+
 
 * Normalizing flows:
 
@@ -370,7 +375,10 @@ plt.title("Curva de aprendizado")
 plt.show()
 ```
 
+Pelo gráfico das curvas de aprendizado para o Normalizing Flows nota-se que a convergência não ocorreu de forma tão rápida quanto a Mistura de Normais. As curvas são semelhantes para a perda no treino e validação porém, a perda no treino é levemente superior a da validação principalmente nas primeiras épocas.
+
 * FlexCode:
+
 
 Para o flexcode, consideraremos a floresta aleatória como algoritmo de regressão para o ajuste de cada coeficiente da combinação linear das funções de base. Além disso, fixaremos 5 como o máximo de funções base ortonormais, utilizando a base de cossenos:
 ```{python}
@@ -526,9 +534,9 @@ results_transposed = results.T
 results_transposed.columns = ['Perda L2 (Erro padrão)', 'Log-Verossimilhança (Erro padrão)']
 results_transposed
 ```
-Percebemos que, tanto em termos da perda L2 quanto da entropria cruzada, o modelo de misturas de normais parece ter a melhor performance, o que indica que tal modelo talvez seja o mais adequado para a modelagem da densidade condicional no banco de dados explorado.
+Percebemos que, tanto em termos da perda L2 quanto da entropria cruzada, o modelo de misturas de normais parece ter a melhor performance, indicando que esse modelo seja o mais adequado para a modelagem da densidade condicional para o banco de dados explorado.
 \subsection{Item 2}
-Fixaremos a seguir 5 valores de $X$ do conjunto de teste e plotaremos cada estimativa de densidade condicional para tais valores:
+Fixaremos na [Figura @fig-plot-densities] os 5 valores de $X$ do conjunto de teste e plotaremos cada estimativa de densidade condicional para tais valores.
 ```{python}
 #| label: fig-plot-densities
 #| fig-cap: "Densidades estimadas de cada método para 5 observações do conjunto de teste"
@@ -560,8 +568,10 @@ plt.tight_layout()
 plt.show()
 ```
 
+Assim, é possivel observar na [Figura @fig-plot-densities] que a densidade condicional obtida via Mistura de Normais possui comportamento mais suave em relação as demais nas 5 observações. A densidade condicional estimada pelo Normalizing Flows tem comportamento mais conturbado, enquanto a densidade estimada pelo FlexCode apesar de possuir comportamento suave os valores são baixos.
+
 \subsection{Item 3}
-A seguir iremos computar os PIT values de cada metodologia e checar se para cada modelo, eles seguem uma distribuição uniforme. Essa checagem será feita tanto visualmente quanto a partir de um teste de KS. Primeiramente, calculamos os pit values:
+A seguir iremos computar os PIT values de cada metodologia e checar se para cada um dos modelos seguem uma distribuição uniforme. Essa checagem será feita tanto visualmente quanto a partir de um teste de KS. Primeiramente, calculamos os pit values:
 ```{python}
 # Mistura de normais
 pit_mx = cdetools.cdf_coverage(densities_mx, fx_y_grid, y_test)  
@@ -602,7 +612,7 @@ axs[2].set_ylabel('Densidade')
 plt.tight_layout()
 plt.show()
 ```
-Percebe-se graficamente que a mistura de Gaussianas parece ser o método com pit-values mais próximos da distribuição uniforme, enquanto os pit-values do normalizing flows e do flexcode parecem ter certos desvios quanto a distribuição postulada sob $H_0$, o que sugere que ambos os modelos podem não estar adequadamente calibrados. Para confirmar tais indicios, realizamos o teste KS dos pit-values, testando se a distribuição dos pit-values de fato segue uma $U(0,1)$:
+Percebe-se graficamente que a mistura de Gaussianas parece ser o método com pit-values mais próximos da distribuição uniforme, enquanto os pit-values do normalizing flows e do flexcode parecem ter certos desvios quanto a distribuição Uniforme postulada sob $H_0$, o que sugere que ambos os modelos podem não estar adequadamente calibrados. Para confirmar tais indícios, realizamos o teste KS dos pit-values, testando se a distribuição dos pit-values de fato segue uma $U(0,1)$:
 ```{python}
 from scipy.stats import kstest
 
@@ -618,7 +628,7 @@ ks_df = pd.DataFrame({
 })
 ks_df
 ```
-Pelos p-valores apresentados na tabela acima, assim como também pelos valores das estatísticas KS, temos evidências de que o modelo de densidade condicional baseado em mistura de normais esteja bem calibrado, com seus respectivos pit-values seguindo de forma muito próxima uma distribuição uniforme. Já modelos obtidos via FlexCode e Normalizing Flows estão descalibrados, com ambas metodologias aprensetando p-valores muito pequenos juntamente com uma estatística KS razoavelmente grande.
+Pelos p-valores  e estatísticas  do teste KS apresentados na tabela acima, temos evidências de que o modelo de densidade condicional baseado em Mistura de Normais esteja bem calibrado, com seus respectivos pit-values seguindo de forma muito próxima uma distribuição uniforme. Já modelos obtidos via FlexCode e Normalizing Flows estão descalibrados, com ambas metodologias apresentando p-valores muito pequenos juntamente com uma estatística KS razoavelmente grande.
 
 \section{Exercício 2}
 Primeiramente, importaremos o banco de dados utilizado:
@@ -629,7 +639,7 @@ header = 1).drop("ID", axis = 1)
 # visualizando numero de variaveis, observações e tipo de cada variavel
 credit_card_data.info()
 ```
-A seguir, transformaremos as variáveis categóricas em dummies e separaremos a variavel resposta $y$ da matriz de covariáveis $X$:
+A seguir, transformaremos as variáveis categóricas em dummies e separaremos a variavel resposta $Y$ da matriz de covariáveis $X$:
 ```{python}
 # obtendo variavel resposta y
 y = credit_card_data.loc[:, "default payment next month"].values
@@ -653,8 +663,7 @@ credit_card_filtered = pd.get_dummies(
 # obtendo matriz de covariaveis
 X = credit_card_filtered.values
 ```
-
-Com isso feito, dividiremos o conjunto de dados em treino/calibragem e teste, utilizando-se $90\%$ para treino e calibragem e $10\%$ para teste:
+Após importar o conjunto de dados, dividiremos o conjunto de dados em treino/calibragem e teste, utilizando-se $90\%$ para treino e calibragem e $10\%$ para teste:
 ```{python}
 # separando os dados em treino+calibragem e teste
 X_train_val, X_test, y_train_val, y_test = (
@@ -665,7 +674,7 @@ X_train_val, X_test, y_train_val, y_test = (
     random_state=145)
     )
 ```
-A seguir, diviremos o conjunto de treino e calibragem em $70\%$ treino e $30\%$ calibragem, tendo:
+A seguir, diviremos o conjunto de treino e calibragem em $70\%$ treino e $30\%$ calibragem,
 ```{python}
 # dividindo o conjunto em treino e calibração
 X_tr, X_cal, y_tr, y_cal = (
@@ -688,9 +697,9 @@ X_tr_scaled = scaler.transform(X_tr)
 X_cal_scaled = scaler.transform(X_cal)
 X_test_scaled = scaler.transform(X_test)
 ```
-Com os dados divididos em conjuntos de treino, calibragem e teste, podemos primeiramente ajustar os diferentes modelos de classificação considerados e compara-los em termos do score de brier e log-loss:
+Com os dados divididos em conjuntos de treino, calibragem e teste, podemos primeiramente ajustar os diferentes modelos de classificação considerados e compara-los em termos do score de brier e log-loss.
 \subsection{Item 1}
-Ajustaremos a seguir os três modelos de classificação:
+Ajustaremos a seguir os três modelos de classificação, são eles: Regressão logística com penalização lasso, KNN e Random Forest.
 ```{python}
 # | cache: True
 # logistica com penalização lasso
@@ -712,6 +721,8 @@ rf_clf = RandomForestClassifier(
     n_estimators=300, criterion="log_loss", max_depth=10, random_state=15
 ).fit(X_tr, y_tr)
 ```
+
+Para esse caso, o KNN foi ajustado com $K=30$ e o Random Forest com 300 árvores.
 Agora, computaremos o score de brier e a log-loss para cada método no conjunto de teste, tendo a tabela:
 ```{python}
 # calculando score de brier
@@ -761,6 +772,8 @@ results_transposed = results.T
 results_transposed.columns = ['Score de brier', 'Log-Verossimilhança']
 results_transposed
 ```
+
+Assim, é possível notar que a Regressão Logística tem melhor desempenho, pois possui os menores valores de Score de Brier e log-loss, seguido de KNN e Random Forest, respectivamente.
 
 \subsection{Item 2}
 A seguir, podemos analisar o calibration plot de cada metodologia através da Figura:
@@ -869,8 +882,11 @@ for ax in [ax1, ax2, ax3]:
 plt.show()
 ```
 
+Nota-se na [Figura @fig-calibration-plot] que o Random Forest aparenta estar mais calibrado em relação aos outros métodos. A Regressão Logística apesar de maior variação, contem valores mais ajustados nos limites do intervalo favorecendo a valor do Score de Brier em relação aos outros métodos. O KNN parece não estar muito bem calibrado principalmente para valores próximos a $1$. 
+
+
 \subsection{Item 3}
-Vamos a seguir recalibrar cada método via histogram binning. Para tal, ajustaremos cada método ao histogram binning no conjunto de calibragem separado inicialmente, tendo:
+Vamos a seguir recalibrar cada método via histogram binning. Para tal, ajustaremos cada método ao histogram binning no conjunto de calibragem separado inicialmente, assim, temos:
 ```{python}
 hist_logis, hist_knn, hist_rf = (
     HistogramCalibrator(n_bins=20),
@@ -890,7 +906,7 @@ hist_logis.fit(logis_cal, y_cal)
 hist_knn.fit(knn_cal, y_cal)
 hist_rf.fit(rf_cal, y_cal)
 ```
-Podemos então visualizar o calibration plot das probabilidades recalibradas no conjunto de teste a partir da [Figura @fig-calibration-plot-recalibrated]:
+Podemos então visualizar o calibration plot das probabilidades recalibradas no conjunto de teste a partir da [Figura @fig-calibration-plot-recalibrated].
 ```{python}
 # | label: fig-calibration-plot-recalibrated
 # | fig-cap: "Calibration plot dos métodos de classificação recalibrados"
@@ -1055,5 +1071,6 @@ results_transposed = results.T
 results_transposed.columns = ["Score de brier", "Log-Verossimilhança"]
 results_transposed
 ```
-Em geral, nota-se uma ligeira melhora de performance em todos os métodos, tendo tanto o score de brier quanto a log-loss menores valores considerando-se os desempenhos inciais dos métodos pré-calibração.
+Em geral, nota-se que para o Random Forest e KNN  melhora de performance com menores valores para o Score de Brier e log-loss considerando-se os desempenhos inciais dos métodos pré-calibração. A Regressão Logística teve ligeiro redução no seu desempenho em relação a pré-calibração, possivelmente devido a distribuição das probabilidades mais longe do valor $1$ após a calibragem.
+Assim, o  Random Forest possui melhores valores em relação ao KNN e Regressão Logística.
 
