@@ -76,10 +76,12 @@ protein_data.info()
 A variável resposta considerada nesse problema é a variável RMSD. Assim, temos interesse em modelar a incerteza aleatórica de RMSD em função das outras variáveis que nos dão diferentes características de cada proteina. Nota-se que todas as covariáveis consideradas são quantitativas, tendo apenas uma delas como discreta (F8). Como o conjunto de dados contém 45730 observações, separaremos o conjunto em $90\%$ treino e validação e $10\%$ para teste, já que assim, conseguimos destinar uma parcela considerável dos dados para ajuste dos diferentes modelos ao passo que alcançamos boas estimativas para as perdas e PIT-values. 
 ```{python}
 # separando os dados em treino+validação e teste
-train_val_data, test_data = train_test_split(protein_data, test_size=0.1, random_state=42)
+train_val_data, test_data = train_test_split(
+    protein_data, test_size=0.1, random_state=42
+    )
 # tamanho do conjunto de treino
 print(f"Tamanho do conjunto de treino e validação {train_val_data.shape[0]}")
-print(f"Tamanho do conjunto de teste{test_data.shape[0]}")
+print(f"Tamanho do conjunto de teste {test_data.shape[0]}")
 ```
 Já, para o treinamento e validação, consideraremos uma divisão de $70\%$ para treino e $30\%$ para validação:
 
@@ -91,10 +93,10 @@ train_data, valid_data = train_test_split(
 # tamanho do conjunto de treino
 train_data.shape[0]
 print(f"Tamanho do conjunto de treino {train_data.shape[0]}")
-print(f"Tamanho do conjunto de validação{valid_data.shape[0]}")
+print(f"Tamanho do conjunto de validação {valid_data.shape[0]}")
 ```
 
-Além disso, os dados foram transformados do dataframe do pandas para arrays do numpy, e na sequência a matriz de covariáveis foi padronizada. Para serem utilizados como entradas na rede neural os arrays foram transformados em torch.tensor e separados em batch de tamanho $350$ no teste e $150$ na validação.
+Além disso, os dados foram transformados do dataframe do pandas para arrays do numpy, e na sequência a matriz de covariáveis foi padronizada. Para serem utilizados como entradas na rede neural os arrays foram transformados em torch.tensor e separados em minilotes (batches) de tamanho $350$ no teste e $150$ na validação.
 
 ```{python}
 torch.manual_seed(167)
@@ -236,32 +238,30 @@ desc="Ajustando o rede neural de mistura de normais"):
             break
     mx_model.train()
 ```
-Podemos visualizar a curva de aprendizado da rede:
+Podemos visualizar a curva de aprendizado da rede pela [Figura @fig-learning-curve-mixture-net]. Podemos observar no gráfico que a convergência ocorre rapidamente após poucas épocas e chega a um platô para as demais épocas. Além disso, a perda no treino e na validação possuem comportamento semelhante.
 ```{python}
 # | label: fig-learning-curve-mixture-net
 # | fig-cap: "Curva de aprendizado do modelo de mistura de Normais"
 # | fig-align: center
-# | fig-height: 4
-# | fig-width: 6
+# | fig-pos: '!http'
 # | echo: false
+plt.figure(figsize=(5, 3))
 plt.plot(np.array(avg_loss_train_list), color="tab:red", label="Perda no treino")
 plt.plot(np.array(avg_loss_val_list), color="tab:blue", label="Perda na validação")
 plt.legend()
 plt.xlabel("Época")
-plt.ylabel("Entropria Cruzada")
+plt.ylabel("Entropia Cruzada")
 plt.title("Curva de aprendizado")
 plt.show()
 ```
-
-Podemos observar no gráfico das curvas de aprendizado da rede que a convergência ocorre rapidamente após poucas épocas, e a perda no treino e na validação possuem comportamento semelhante.
 
 
 * Normalizing flows:
 
 Definindo primeiro a arquitetura do modelo:
 ```{python}
-# primeiramente, definindo a arquitetura do normalizing flows
-# incluindo o numero de flows e o tipo de cada flow
+# definindo a arquitetura do normalizing flows
+# juntamente com o numero de flows e o tipo de cada flow
 # usaremos a spline quadratica como transformação bijetora
 torch.manual_seed(190)
 # numero de transformações a serem executadas
@@ -301,8 +301,7 @@ nf_optimizer = torch.optim.Adam(
             weight_decay=1e-5,
         )
 ```
-Logo em seguida, treinando o modelo e avaliando curva de aprendizado:
-
+Ajustando o modelo do normalizing flows:
 ```{python}
 # salvando erros do treinamento e da validacao
 nf_avg_loss_train_list, nf_avg_loss_val_list = [], []
@@ -312,7 +311,9 @@ patience = 30
 
 # percorrendo cada epoca
 # starting neural network loop
-for it in tqdm(range(n_epochs), desc="Ajustando o estimador de densidade via normalizing flows"):
+for it in tqdm(
+    range(n_epochs), desc="Ajustando o estimador de densidade via normalizing flows"
+):
     loss_train_array, loss_valid_array = [], []
 
     for X_tr, y_tr in train_loader:
@@ -354,31 +355,28 @@ for it in tqdm(range(n_epochs), desc="Ajustando o estimador de densidade via nor
     else:
         counter += 1
         if counter >= patience:
-            print(f"Early stopping at epoch {it}")
+            print(f"Early stopping na época {it}")
             break
     nf_model.train()
 ```
-
+Avalia-se agora a curva de aprendizado dada pela [Figura @fig-learning-curve-nflows]. Pelo gráfico, nota-se uma curva menos acentuada que a observada pela Mistura de Normais, tendo também maiores variações nos valores obserados de entropia cruzada. Também observa-se que as curvas do treino e da validação são semelhantes, tendo porém a perda no treino levemente superior a da validação principalmente nas primeiras épocas.
 ```{python}
-#| label: fig-learning-curve-nflows
-#| fig-cap: "Curva de aprendizado do Normalizing Flows"
-#| fig-align: center
-#| fig-height: 4
-#| fig-width: 6
-#| echo: false
+# | label: fig-learning-curve-nflows
+# | fig-cap: "Curva de aprendizado do Normalizing Flows"
+# | fig-align: center
+# | fig-pos: '!http'
+# | echo: false
+plt.figure(figsize=(5, 3))
 plt.plot(np.array(nf_avg_loss_train_list), color="tab:red", label="Perda no treino")
 plt.plot(np.array(nf_avg_loss_val_list), color="tab:blue", label="Perda na validação")
 plt.legend()
 plt.xlabel("Época")
-plt.ylabel("Entropria Cruzada")
+plt.ylabel("Entropia Cruzada")
 plt.title("Curva de aprendizado")
 plt.show()
 ```
 
-Pelo gráfico das curvas de aprendizado para o Normalizing Flows nota-se que a convergência não ocorreu de forma tão rápida quanto a Mistura de Normais. As curvas são semelhantes para a perda no treino e validação porém, a perda no treino é levemente superior a da validação principalmente nas primeiras épocas.
-
 * FlexCode:
-
 
 Para o flexcode, consideraremos a floresta aleatória como algoritmo de regressão para o ajuste de cada coeficiente da combinação linear das funções de base. Além disso, fixaremos 5 como o máximo de funções base ortonormais, utilizando a base de cossenos:
 ```{python}
@@ -389,7 +387,7 @@ fx_model.fit(X_train, y_train)
 fx_model.tune(X_valid, y_valid)
 ```
 
-Obteremos agora as estimativas de densidades condicionais para as observações do conjunto de teste, juntamente com a estimativa da log-verossimilhança negativa dos valores observados:
+A seguir, obteremos para todos os métodos as estimativas de densidades condicionais cada observação do conjunto de teste, juntamente com a estimativa do risco baseado na log-verossimilhança negativa (ou log-loss). Temos:
 
 * Modelo de Mistura:
 ```{python}
@@ -501,13 +499,15 @@ for y in y_test:
 fx_log_loss = [-np.mean(fx_log_loss), np.std(fx_log_loss) / np.sqrt(X_test.shape[0])]
 ```
 
-Podemos então comparar cada uma das densidade estimadas dos métodos em termos da perda L2:
+Calcularemos agora para cada uma das densidade estimadas no conjunto de teste o risco baseado na perda L2:
 
 ```{python}
-# instalando o cdetools para calcular a perda L2
+###### codigo para instalar o cdetools para calcular a perda L2
 # import sys
 # sys.path.append('/content/cdetools/python/src')
 # !pip install git+https://github.com/lee-group-cmu/cdetools.git#subdirectory=python
+
+###### codigo para calcular perda L2 usando o pacote
 import cdetools as cdetools
 
 # computando perda L2
@@ -519,6 +519,7 @@ nf_loss = cdetools.cde_loss(densities_nf, fx_y_grid, y_test)
 fx_loss = cdetools.cde_loss(densities_fx, fx_y_grid, y_test) 
 ```
 
+Obtemos então os seguintes resultados:
 ```{python}
 results = pd.DataFrame({
     'Mistura de gaussianas': [f"{gm_loss[0]:.4f} ({gm_loss[1]:.4f})",
@@ -529,25 +530,26 @@ results = pd.DataFrame({
     f"{nf_log_loss[0]:.4f} ({nf_log_loss[1]:.4f})"]
 })
 
-# Transpose the DataFrame
+# transpondo o data frame resumindo as perdas e erros padrões
 results_transposed = results.T
-results_transposed.columns = ['Perda L2 (Erro padrão)', 'Log-Verossimilhança (Erro padrão)']
+results_transposed.columns = ['Risco L2 (Erro padrão)',
+'-Log-Verossimilhança (Erro padrão)'
+]
 results_transposed
 ```
 Percebemos que, tanto em termos da perda L2 quanto da entropria cruzada, o modelo de misturas de normais parece ter a melhor performance, indicando que esse modelo seja o mais adequado para a modelagem da densidade condicional para o banco de dados explorado.
 \subsection{Item 2}
-Fixaremos na [Figura @fig-plot-densities] os 5 valores de $X$ do conjunto de teste e plotaremos cada estimativa de densidade condicional para tais valores.
+Fixamos a seguir 5 valores de $X$ do conjunto de teste e visualizamos a estimativa de densidade condicional para cada um através da [Figura @fig-plot-densities]. É possivel observar nesses gráficos que a densidade condicional obtida via Mistura de Normais possui comportamento mais suave em relação as demais nas 5 observações. Já a densidade condicional estimada pelo Normalizing Flows tem comportamento mais conturbado e pouco suave, enquanto a densidade estimada pelo FlexCode apesar de ser suave, possui poucos trechos de alta densidade. Ressalta-se também um comportamento unimodal da mistura de gaussianas para a maioria das observações, tendo apenas as observações 251 e 36 com certa bimodalidade.
 ```{python}
-#| label: fig-plot-densities
-#| fig-cap: "Densidades estimadas de cada método para 5 observações do conjunto de teste"
-#| fig-align: center
-#| fig-height: 8
-#| fig-width: 12
-#| echo: false
+# | label: fig-plot-densities
+# | fig-cap: "Densidades estimadas de cada método para 5 observações do conjunto de teste"
+# | fig-align: center
+# | echo: false
+# | fig-pos: '!http'
 
 # selecionando 5 indices do conjunto de teste
 idxs = np.array([1, 35, 60, 250, 550])
-fig, axs = plt.subplots(3, 2, figsize=(12, 8))
+fig, axs = plt.subplots(3, 2, figsize=(10, 6))
 for i, idx in enumerate(idxs):
     row = i // 2
     col = i % 2
@@ -563,15 +565,15 @@ fig.delaxes(axs[2, 1])
 
 # Adicionando a legenda fora do quadro
 handles, labels = axs[0, 0].get_legend_handles_labels()
-fig.legend(handles, labels, loc='upper center', bbox_to_anchor=(0.5, 1.05), ncol=3)
+fig.legend(handles, labels, loc="upper center", bbox_to_anchor=(0.5, 1.05), ncol=3)
 plt.tight_layout()
 plt.show()
 ```
 
-Assim, é possivel observar na [Figura @fig-plot-densities] que a densidade condicional obtida via Mistura de Normais possui comportamento mais suave em relação as demais nas 5 observações. A densidade condicional estimada pelo Normalizing Flows tem comportamento mais conturbado, enquanto a densidade estimada pelo FlexCode apesar de possuir comportamento suave os valores são baixos.
+É possivel observar através da [Figura @fig-plot-densities] que a densidade condicional obtida via Mistura de Normais possui comportamento mais suave em relação as demais nas 5 observações. A densidade condicional estimada pelo Normalizing Flows tem comportamento mais conturbado e pouco suave, enquanto a densidade estimada pelo FlexCode apesar de ser suave, possui poucos trechos de maiores densidades.
 
 \subsection{Item 3}
-A seguir iremos computar os PIT values de cada metodologia e checar se para cada um dos modelos seguem uma distribuição uniforme. Essa checagem será feita tanto visualmente quanto a partir de um teste de KS. Primeiramente, calculamos os pit values:
+Nesse item iremos computar os PIT values de cada metodologia e checar se cada uma delas está calibrada, com os valores PIT seguindo uma distribuição uniforme. Essa checagem será feita tanto visualmente quanto a partir de um teste de KS. Primeiramente, calculamos os pit values:
 ```{python}
 # Mistura de normais
 pit_mx = cdetools.cdf_coverage(densities_mx, fx_y_grid, y_test)  
@@ -580,34 +582,33 @@ pit_fx = cdetools.cdf_coverage(densities_fx, fx_y_grid, y_test)
 # NFlow
 pit_nf = cdetools.cdf_coverage(densities_nf, fx_y_grid, y_test)
 ```
-Em seguida, podemos visualizar o histograma dos pit-values para cada metodologia através da [Figura @fig-pit-values]:
+Em seguida, podemos visualizar o histograma dos pit-values para cada metodologia através da [Figura @fig-pit-values].
 ```{python}
-#| label: fig-pit-values
-#| fig-cap: "Histograma dos pit-values de cada método."
-#| fig-align: center
-#| fig-height: 6
-#| fig-width: 8
-#| echo: false
+# | label: fig-pit-values
+# | fig-cap: "Histograma dos pit-values de cada método."
+# | fig-align: center
+# | echo: false
+# | fig-pos: '!http'
 fig, axs = plt.subplots(3, 1, figsize=(8, 6), sharex=True)
 
 # Mistura de Gaussianas
-axs[0].hist(pit_mx, bins=30, density=True, alpha=0.7, color='tab:blue')
-axs[0].axhline(1, color='red', linestyle='--')
-axs[0].set_title('Mistura de Gaussianas')
-axs[0].set_ylabel('Densidade')
+axs[0].hist(pit_mx, bins=30, density=True, alpha=0.7, color="tab:blue")
+axs[0].axhline(1, color="red", linestyle="--")
+axs[0].set_title("Mistura de Gaussianas")
+axs[0].set_ylabel("Densidade")
 
 # FlexCode
-axs[1].hist(pit_fx, bins=30, density=True, alpha=0.7, color='tab:green')
-axs[1].axhline(1, color='red', linestyle='--')
-axs[1].set_title('FlexCode')
-axs[1].set_ylabel('Densidade')
+axs[1].hist(pit_fx, bins=30, density=True, alpha=0.7, color="tab:green")
+axs[1].axhline(1, color="red", linestyle="--")
+axs[1].set_title("FlexCode")
+axs[1].set_ylabel("Densidade")
 
 # Normalizing Flows
-axs[2].hist(pit_nf, bins=30, density=True, alpha=0.7, color='tab:orange')
-axs[2].axhline(1, color='red', linestyle='--')
-axs[2].set_title('Normalizing Flows')
-axs[2].set_xlabel('PIT Values')
-axs[2].set_ylabel('Densidade')
+axs[2].hist(pit_nf, bins=30, density=True, alpha=0.7, color="tab:orange")
+axs[2].axhline(1, color="red", linestyle="--")
+axs[2].set_title("Normalizing Flows")
+axs[2].set_xlabel("PIT Values")
+axs[2].set_ylabel("Densidade")
 
 plt.tight_layout()
 plt.show()
@@ -699,10 +700,11 @@ X_test_scaled = scaler.transform(X_test)
 ```
 Com os dados divididos em conjuntos de treino, calibragem e teste, podemos primeiramente ajustar os diferentes modelos de classificação considerados e compara-los em termos do score de brier e log-loss.
 \subsection{Item 1}
-Ajustaremos a seguir os três modelos de classificação, são eles: Regressão logística com penalização lasso, KNN e Random Forest.
+Ajustaremos a seguir os seguintes modelos de classificação: Regressão logística com penalização lasso, KNN e Random Forest.
 ```{python}
 # | cache: True
 # logistica com penalização lasso
+# tunando parametero de regularização lambda
 logistic_clf = LogisticRegressionCV(
     cv=5,
     random_state=19,
@@ -722,7 +724,7 @@ rf_clf = RandomForestClassifier(
 ).fit(X_tr, y_tr)
 ```
 
-Para esse caso, o KNN foi ajustado com $K=30$ e o Random Forest com 300 árvores.
+Para esse caso, o KNN foi ajustado com $K=30$ e o Random Forest com 300 árvores e profundidade total de 10.
 Agora, computaremos o score de brier e a log-loss para cada método no conjunto de teste, tendo a tabela:
 ```{python}
 # calculando score de brier
@@ -773,10 +775,10 @@ results_transposed.columns = ['Score de brier', 'Log-Verossimilhança']
 results_transposed
 ```
 
-Assim, é possível notar que a Regressão Logística tem melhor desempenho, pois possui os menores valores de Score de Brier e log-loss, seguido de KNN e Random Forest, respectivamente.
+É possível notar que a Regressão Logística tem melhor desempenho, pois possui os menores valores de Score de Brier e log-loss, seguido de KNN e Random Forest, respectivamente.
 
 \subsection{Item 2}
-A seguir, podemos analisar o calibration plot de cada metodologia através da Figura:
+A seguir, podemos analisar o calibration plot de cada metodologia através da [Figura @fig-calibration-plot]:
 ```{python}
 # | label: fig-calibration-plot
 # | fig-cap: "Calibration plot dos métodos de classificação ajustados"
@@ -886,7 +888,7 @@ Nota-se na [Figura @fig-calibration-plot] que o Random Forest aparenta estar mai
 
 
 \subsection{Item 3}
-Vamos a seguir recalibrar cada método via histogram binning. Para tal, ajustaremos cada método ao histogram binning no conjunto de calibragem separado inicialmente, assim, temos:
+Vamos a seguir recalibrar cada método via histogram binning. Para tal, ajustaremos cada método ao histogram binning no conjunto de calibragem separado inicialmente, tendo:
 ```{python}
 hist_logis, hist_knn, hist_rf = (
     HistogramCalibrator(n_bins=20),
@@ -1071,6 +1073,5 @@ results_transposed = results.T
 results_transposed.columns = ["Score de brier", "Log-Verossimilhança"]
 results_transposed
 ```
-Em geral, nota-se que para o Random Forest e KNN  melhora de performace com menores valores para o Score de Brier e log-loss considerando-se os desempenhos inciais dos métodos pré-calibração. A Regressão Logística teve ligeiro redução no seu desempenho em relação a pré-calibração, possivelmente devido a distribuição das probabilidades mais longe do valor $1$ após a calibragem.
-Assim, o  Random Forest possui melhores valores em relação ao KNN e Regressão Logística.
+Em geral, nota-se que o Random Forest e KNN tem melhora de performace, tendo menores valores para o Score de Brier e log-loss com relação aos desempenhos inciais dos métodos pré-calibração. Em particular, ressalta-se a consideravel melhora do Random Forest e ligeira melhora do KNN. Já a Regressão Logística teve uma leve piorada no seu desempenho em relação a pré-calibração, possivelmente devido ao reagrupamento de probabilidades estimadas acima de 0.8 em menores valores, como pode ser observado na [Figura @fig-calibration-plot-recalibrated], tendo probabilidades estimadas mais distante do valor $1$ após a calibragem. Enfim, nota-se que após a recalibragem, o Random Forest passa a possuir melhor performance com relação ao KNN e Regressão Logística tanto pré quando pós calibração.
 
