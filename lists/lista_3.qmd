@@ -126,7 +126,7 @@ mean()
 data.frame("Região Preditiva" = c("Simétrica", "Quantílica"),
 "Cobertura empírica" = c(cover_sym, cover_q) |> round(4))
 ```
-Percebe-se que ambas regiões são razoavelmente próximas da cobertura nominal 0.95, tendo porém uma leve sub-cobertura, principalmente a região quantílica que está um pouco mais distante do nível nominal que o intervalo simétrico. Podemos também observar a seguir as regiões preditivas estimadas no conjunto de teste para 5 diferentes valores a seguir:
+Percebe-se que ambas regiões são razoavelmente próximas da cobertura nominal 0.95, tendo porém uma leve sub-cobertura, principalmente a região quantílica que está um pouco mais distante do nível nominal que o intervalo simétrico. Podemos também observar pela [Figura @fig-pred-int-bayes] as regiões preditivas estimadas no conjunto de teste para 5 diferentes valores.
 ```{r}
 #| label: fig-pred-int-bayes
 #| fig-cap: "Intervalos preditivos bayesianos para as observações selecionadas"
