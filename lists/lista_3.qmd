@@ -1,0 +1,158 @@
+---
+title: "Lista 3 - Tópicos em ML"
+execute:
+  warning: false
+author:   
+  - Luben M. C. Cabezas
+  - Reinaldo C. Anacleto
+tbl-cap-location: top
+format:
+  pdf:
+     df-print: kable
+     include-in-header:  
+        - text: |
+            \usepackage{amsmath}
+---
+Primeiramente, importando bibliotecas que serão utilizadas:
+
+```{r}
+# bibliotecas do R
+library(reticulate)
+library(ggplot2)
+library(MASS)
+library(BART)
+library(purrr)
+```
+```{python}
+# pacotes para transformacao dos dados e graficos
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+# pre-processamento de dados
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
+
+# modulo para acompanhar progresso
+from tqdm import tqdm
+```
+
+\section{Exercício 1}
+Importando o conjunto de dados de proteinas:
+```{python}
+# importando os dados
+protein_data = pd.read_csv("data/CASP.csv")
+# visualizando numero de variaveis, observações e tipo de cada variavel
+protein_data.info()
+```
+Dividindo o conjunto em treino, calibração e teste. O conjunto de calibração será usado apenas para os métodos conformal:
+```{python}
+# Dividindo em treino e teste
+train_val_data, test_data = train_test_split(
+    protein_data, test_size=0.1, random_state=42
+)
+
+# Dividindo em treino e calibracao
+train_data, calib_data = train_test_split(
+    train_val_data, test_size=0.5, random_state=125
+)
+
+# Transformando em arrays
+# arrays para conformal
+X_train, y_train = train_data.iloc[:, 1:].values, train_data.iloc[:, 0].values
+X_calib, y_calib = calib_data.iloc[:, 1:].values, calib_data.iloc[:, 0].values
+X_test, y_test = test_data.iloc[:, 1:].values, test_data.iloc[:, 0].values
+# array para bayesiano
+X_train_all, y_train_all = train_val_data.iloc[:, 1:], train_val_data.iloc[:, 0]
+```
+\subsection{Item 1}
+
+\subsection{Item 2}
+
+\subsection{Item 3}
+
+\subsection{Item 4}
+Para esse exemplo, utilizaremos o conjunto de dados de treino completo. Utilizaremos o pacote BART no R, usando o reticulate como forma de traduzir os objetos em python para objetos em R. Temos os conjuntos de treino e teste:
+```{r}
+# transformando objetos usando o reticulate
+X_train_b <- py$X_train_all
+y_train_b <- py$y_train_all
+X_test_b <- py$X_test
+y_test_b <- py$y_test
+```
+Agora ajustando o BART:
+```{r}
+#| cache: true
+# Set seed for reproducibility
+set.seed(686)
+# Fit BART model
+post <- wbart(X_train_b, y_train_b, X_test_b, ndpost = 1000)
+```
+Obtemos agora uma região preditiva simétrica e a região quantílica:
+```{r}
+alpha <- 0.05
+# Obtendo os lower e upper bounds da regiao simetrica para o conjunto de teste
+means <- post$yhat.test.mean
+std_dev <- sqrt(mean(post$sigma)^2 + apply(post$yhat.test, 2, sd)^2)
+lower_bound_sym <- means - 1.96 * std_dev
+upper_bound_sym <- means + 1.96 * std_dev
+
+sigmas <- post$sigma[101:1100]
+# Obtendo os lower e upper bounds da região baseada nos quantis
+# encontrando quantil inferior usando monte carlo
+y_new <- 1:length(y_test_b) |>
+map(function(.x){
+  y_sim <- post$yhat.test[, .x]
+  return(
+    rnorm(length(y_sim), mean = y_sim, sd = sigmas)
+  )
+}) |> unlist() |> matrix(nrow = 1000)
+
+# grid em y
+lower_bound_q <- apply(y_new, 2, quantile, probs = alpha/2)
+upper_bound_q <- apply(y_new, 2, quantile, probs = (1 - alpha/2)) 
+```
+Tendo ambas as regiões, podemos a seguir calcular a cobertura empírica nesses casos:
+```{r}
+cover_sym <- ((lower_bound_sym <= y_test_b) & 
+(upper_bound_sym >= y_test_b)) |>
+mean()
+
+cover_q <- ((lower_bound_q <= y_test_b) & 
+(upper_bound_q >= y_test_b)) |>
+mean()
+
+data.frame("Região Preditiva" = c("Simétrica", "Quantílica"),
+"Cobertura empírica" = c(cover_sym, cover_q) |> round(4))
+```
+Percebe-se que ambas regiões são razoavelmente próximas da cobertura nominal 0.95, tendo porém uma leve sub-cobertura, principalmente a região quantílica que está um pouco mais distante do nível nominal que o intervalo simétrico. Podemos também observar a seguir as regiões preditivas estimadas no conjunto de teste para 5 diferentes valores a seguir:
+```{r}
+#| label: fig-pred-int-bayes
+#| fig-cap: "Intervalos preditivos bayesianos para as observações selecionadas"
+#| fig-align: center
+#| fig-pos: '!http'
+#| echo: false
+
+# valores para as regiões de predição
+vals_idx <- c(2, 50, 175, 600, 1250)
+pred_data <- data.frame(
+  indices = c(paste0("Obs ", rep(vals_idx, 2))),
+  lower_bound = c(
+  lower_bound_sym[vals_idx], lower_bound_q[vals_idx]),
+  upper_bound = c(upper_bound_sym[vals_idx],
+  upper_bound_q[vals_idx]),
+  type = c(rep(c("Simétrica", "Quantílica"), each = 5)))
+
+# Plotting the pred_data lower and upper bound
+ggplot(pred_data, aes(x = type, ymin = lower_bound, ymax = upper_bound)) +
+  geom_linerange() +
+  facet_wrap(~ indices, scales = "fixed") +
+  labs(
+    title = "Regiões Preditivas Estimadas",
+    x = "Tipo de Região",
+    y = "Variável resposta"
+  ) +
+  theme_minimal()
+```
+Percebemos que há poucas diferenças entre os tipos de regiões, com ambas tendo tamanhos similares e razoavelmente largos.
