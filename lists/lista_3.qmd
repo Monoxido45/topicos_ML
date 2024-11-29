@@ -17,54 +17,51 @@ Primeiramente, importando bibliotecas que serão utilizadas:
 
 ```{r}
 # bibliotecas do R
-library(reticulate)
 library(ggplot2)
 library(MASS)
 library(BART)
 library(purrr)
-```
-```{python}
-# pacotes para transformacao dos dados e graficos
-import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
-import seaborn as sns
-
-# pre-processamento de dados
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler
-
-# modulo para acompanhar progresso
-from tqdm import tqdm
+library(dplyr)
 ```
 
 \section{Exercício 1}
 Importando o conjunto de dados de proteinas:
-```{python}
+```{r}
 # importando os dados
-protein_data = pd.read_csv("data/CASP.csv")
+protein_data <- read.csv("data/CASP.csv")
 # visualizando numero de variaveis, observações e tipo de cada variavel
-protein_data.info()
+protein_data |> str()
 ```
 Dividindo o conjunto em treino, calibração e teste. O conjunto de calibração será usado apenas para os métodos conformal:
-```{python}
+```{r}
+set.seed(45)
 # Dividindo em treino e teste
-train_val_data, test_data = train_test_split(
-    protein_data, test_size=0.1, random_state=42
-)
+n_train_val <- floor(0.9 * nrow(protein_data))
+train_val_ind <- sample(seq_len(nrow(protein_data)), n_train_val)
+train_val_data <- protein_data[train_val_ind, ]
+test_data <- protein_data[-train_val_ind, ]
 
-# Dividindo em treino e calibracao
-train_data, calib_data = train_test_split(
-    train_val_data, test_size=0.5, random_state=125
-)
+# dividindo em treino e calibração
+n_cal<- floor(0.5 * nrow(train_val_data))
+train_cal_ind <- sample(seq_len(nrow(train_val_data)), n_cal)
+calib_data <- train_val_data[train_cal_ind, ]
+train_data <- train_val_data[-train_cal_ind, ]
 
-# Transformando em arrays
-# arrays para conformal
-X_train, y_train = train_data.iloc[:, 1:].values, train_data.iloc[:, 0].values
-X_calib, y_calib = calib_data.iloc[:, 1:].values, calib_data.iloc[:, 0].values
-X_test, y_test = test_data.iloc[:, 1:].values, test_data.iloc[:, 0].values
-# array para bayesiano
-X_train_all, y_train_all = train_val_data.iloc[:, 1:], train_val_data.iloc[:, 0]
+# Transformando em matrizes
+# matriz de features
+X_train <- train_data |> dplyr::select(-1) |> as.matrix()
+X_calib <- calib_data |> dplyr::select(-1) |> as.matrix()
+X_test <- test_data |> dplyr::select(-1) |> as.matrix()
+
+# resposta
+y_train <- train_data |> pull(1)
+y_calib <- calib_data |> pull(1)
+y_test <- test_data |> pull(1)
+
+# matrizes para intervalos preditivos bayesiano
+X_train_b <- train_val_data |> dplyr::select(-1) |> as.matrix()
+y_train_b <- train_val_data |> pull(1)
+n_test <- nrow(X_test)
 ```
 \subsection{Item 1}
 
@@ -73,23 +70,16 @@ X_train_all, y_train_all = train_val_data.iloc[:, 1:], train_val_data.iloc[:, 0]
 \subsection{Item 3}
 
 \subsection{Item 4}
-Para esse exemplo, utilizaremos o conjunto de dados de treino completo. Utilizaremos o pacote BART no R, usando o reticulate como forma de traduzir os objetos em python para objetos em R. Temos os conjuntos de treino e teste:
-```{r}
-# transformando objetos usando o reticulate
-X_train_b <- py$X_train_all
-y_train_b <- py$y_train_all
-X_test_b <- py$X_test
-y_test_b <- py$y_test
-```
+Para esse exemplo, utilizaremos o conjunto de dados de treino completo. Utilizaremos o pacote BART no R, obtendo uma amostra de $1000$ da posteriori para obter as regiões preditivas para $Y$:
 Agora ajustando o BART:
 ```{r}
 #| cache: true
 # Set seed for reproducibility
 set.seed(686)
 # Fit BART model
-post <- wbart(X_train_b, y_train_b, X_test_b, ndpost = 1000)
+post <- wbart(X_train_b, y_train_b, X_test, ndpost = 1000)
 ```
-Obtemos agora uma região preditiva simétrica e a região quantílica:
+Obtemos agora uma região preditiva simétrica e a região preditiva quantílica:
 ```{r}
 alpha <- 0.05
 # Obtendo os lower e upper bounds da regiao simetrica para o conjunto de teste
@@ -101,7 +91,7 @@ upper_bound_sym <- means + 1.96 * std_dev
 sigmas <- post$sigma[101:1100]
 # Obtendo os lower e upper bounds da região baseada nos quantis
 # encontrando quantil inferior usando monte carlo
-y_new <- 1:length(y_test_b) |>
+y_new <- 1:length(y_test) |>
 map(function(.x){
   y_sim <- post$yhat.test[, .x]
   return(
@@ -115,12 +105,12 @@ upper_bound_q <- apply(y_new, 2, quantile, probs = (1 - alpha/2))
 ```
 Tendo ambas as regiões, podemos a seguir calcular a cobertura empírica nesses casos:
 ```{r}
-cover_sym <- ((lower_bound_sym <= y_test_b) & 
-(upper_bound_sym >= y_test_b)) |>
+cover_sym <- ((lower_bound_sym <= y_test) & 
+(upper_bound_sym >= y_test)) |>
 mean()
 
-cover_q <- ((lower_bound_q <= y_test_b) & 
-(upper_bound_q >= y_test_b)) |>
+cover_q <- ((lower_bound_q <= y_test) & 
+(upper_bound_q >= y_test)) |>
 mean()
 
 data.frame("Região Preditiva" = c("Simétrica", "Quantílica"),
@@ -129,24 +119,29 @@ data.frame("Região Preditiva" = c("Simétrica", "Quantílica"),
 Percebe-se que ambas regiões são razoavelmente próximas da cobertura nominal 0.95, tendo porém uma leve sub-cobertura, principalmente a região quantílica que está um pouco mais distante do nível nominal que o intervalo simétrico. Podemos também observar pela [Figura @fig-pred-int-bayes] as regiões preditivas estimadas no conjunto de teste para 5 diferentes valores.
 ```{r}
 #| label: fig-pred-int-bayes
-#| fig-cap: "Intervalos preditivos bayesianos para as observações selecionadas"
+#| fig-cap: "Intervalos preditivos bayesianos para as observações selecionadas. Pontos em vermelho representam o rótulo observado para cada observação enquanto pontos azuis representam a média a posteriori em cada caso."
 #| fig-align: center
 #| fig-pos: '!http'
 #| echo: false
 
 # valores para as regiões de predição
 vals_idx <- c(2, 50, 175, 600, 1250)
+true_y <- y_test[vals_idx]
 pred_data <- data.frame(
   indices = c(paste0("Obs ", rep(vals_idx, 2))),
   lower_bound = c(
   lower_bound_sym[vals_idx], lower_bound_q[vals_idx]),
   upper_bound = c(upper_bound_sym[vals_idx],
   upper_bound_q[vals_idx]),
+  truth_values = c(rep(true_y, 2)),
+  mean_values = c(rep(means[vals_idx], 2)),
   type = c(rep(c("Simétrica", "Quantílica"), each = 5)))
 
 # Plotting the pred_data lower and upper bound
 ggplot(pred_data, aes(x = type, ymin = lower_bound, ymax = upper_bound)) +
   geom_linerange() +
+  geom_point(aes(y = truth_values), colour = "red") +
+  geom_point(aes(y = mean_values), colour = "blue")+
   facet_wrap(~ indices, scales = "fixed") +
   labs(
     title = "Regiões Preditivas Estimadas",
@@ -155,4 +150,20 @@ ggplot(pred_data, aes(x = type, ymin = lower_bound, ymax = upper_bound)) +
   ) +
   theme_minimal()
 ```
-Percebemos que há poucas diferenças entre os tipos de regiões, com ambas tendo tamanhos similares e razoavelmente largos.
+Primeiramente visualiza-se nesses casos em particular que todos os intervalos preditivos contém o valor observado de $Y$. Percebemos também que há poucas diferenças entre os tipos de regiões, com ambas tendo tamanhos similares e razoavelmente largos. Além disso, as regiões quantílicas são visualmente apenas um pouco assimétricas em torno da média e um pouco mais curtas que as regiões simétricas. Podemos comparar adicionalmente a largura média das regiões através da seguinte tabela:
+```{r}
+data.frame(
+  "Região Preditiva" = c("Simétrica", "Quantílica"),
+  "Largura" = c(
+    mean(upper_bound_sym - lower_bound_sym),
+    mean(upper_bound_q - lower_bound_q)),
+  "SE*2" = c(
+    2*sqrt(var(upper_bound_sym - lower_bound_sym)/n_test),
+    2*sqrt(var(upper_bound_q - lower_bound_q)/n_test)
+  )
+)
+```
+Concluindo que de fato, as regiões quantílica são em média um pouco menos largas que as regiões simétricas.
+
+
+
