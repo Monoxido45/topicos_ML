@@ -14,7 +14,6 @@ format:
             \usepackage{amsmath}
 ---
 Primeiramente, importando bibliotecas que serão utilizadas:
-
 ```{r}
 # bibliotecas do R
 library(ggplot2)
@@ -22,6 +21,8 @@ library(MASS)
 library(BART)
 library(purrr)
 library(dplyr)
+library(FNN)
+library(quantregForest)
 ```
 
 \section{Exercício 1}
@@ -53,6 +54,14 @@ X_train <- train_data |> dplyr::select(-1) |> as.matrix()
 X_calib <- calib_data |> dplyr::select(-1) |> as.matrix()
 X_test <- test_data |> dplyr::select(-1) |> as.matrix()
 
+# features padronizados para o scale
+# media e desvio padrao
+mean_train <- colMeans(X_train)
+sd_train <- sqrt(apply(X_train, 2, var))
+X_train_scale <- X_train |> scale(center = mean_train, scale = sd_train)
+X_calib_scale <- X_calib |> scale(center = mean_train, scale = sd_train)
+X_test_scale <- X_test |> scale(center = mean_train, scale = sd_train)
+
 # resposta
 y_train <- train_data |> pull(1)
 y_calib <- calib_data |> pull(1)
@@ -65,10 +74,175 @@ n_test <- nrow(X_test)
 ```
 \subsection{Item 1}
 
+```{r}
+# tunando o KNN num grid de K
+# k_grid <- round(seq(1,50,length.out=10))
+
+#erro <- rep(NA,length(k_grid))
+
+#for (ii in seq_along(k_grid)) {
+ # predito <- knn.reg(train=X_train_scale,
+  #                 y=y_train,
+   #                k=k_grid[ii])$pred
+  #erro[ii] <- mean((predito-y_train)^2)
+# }
+
+best_k <- 10
+#k_grid[which.min(erro)]
+
+# predizendo para o conjunto de calibração
+predito1 <- knn.reg(train=X_train_scale,
+                  test=X_calib_scale,
+                  y=y_train,
+                  k=best_k)$pred
+
+# predizendo para o conjunto de teste
+predito2 <- knn.reg(train=X_train_scale,
+                  test=X_test_scale,
+                  y=y_train,
+                  k=best_k)$pred
+
+# calculando o conformal score
+h_rs <- abs(predito1 - y_calib)
+
+# estimando o corte
+t1 <- quantile(h_rs, probs = 0.95)
+cat("Corte estimado para o Regression Split: ", t1)
+```
+
+```{r}
+# Estimando o corte para o weighted e rho
+predito31 <- knn.reg(train=X_train_scale,
+                   test=X_train_scale,
+                   y=y_train,
+                   k=best_k)$pred # E[Y|X](Treinamento)
+
+# desvio absoluto para estimar o rho
+y_ro <- abs(predito31 - y_train)
+# estimando rho para o conjunto de calibracao
+predito3 <- knn.reg(train=X_train_scale,
+                  test=X_calib_scale,
+                  y=y_ro,
+                  k=best_k)$pred #\rho=E[Z|X]
+
+# estimando quantil para o conjunto de calibracao
+h_w <- (abs(predito1 - y_calib))/predito3
+t2 <- quantile(h_w, probs = 0.95)
+
+# estimando rho para o conjunto de teste
+predito4 <- knn.reg(train=X_train_scale,
+                  test=X_test_scale,
+                  y=y_ro,
+                  k=best_k)$pred #\rho=E[Z|X]
+cat("Corte estimado para o Weighted: ", t2)
+```
+
+```{r}
+#| cache: true
+qrf_model <- quantregForest(
+  x = X_train,  
+  y = y_train,
+  n_threads = 4,  
+  ntree = 50,            
+  nodesize = 10,
+  sampsize = 30            
+)
+
+quantis <- c(0.05/2, 1 - (0.05/2))
+pred_qrf <- predict(qrf_model, newdata =X_calib , what = quantis)
+
+y_pred_05 <- pred_qrf[, 1]  # Quantil de 2.5%
+y_pred_95 <- pred_qrf[, 2]  # Quantil de 97.5%
+
+h_cqr <- pmax(y_pred_05 - y_calib, y_calib - y_pred_95)
+t3<-quantile(h_cqr,probs = 0.95)
+
+pred_qrf2 <- predict(qrf_model, newdata =X_test , what = quantis)
+cat("Corte estimado para o CQR: ", t3)
+```
+
+```{r}
+# obtendo limitest inferiores e superiores de cada metodo
+# reg-split
+lower_bound_rs <- predito2 - t1
+upper_bound_rs <- predito2 + t1
+# weighted
+lower_bound_w <- predito2 - (t2*predito4)
+upper_bound_w <- predito2 + (t2*predito4)
+# CQR
+lower_bound_cqr <- pred_qrf2[, 1] - t3
+upper_bound_cqr <- pred_qrf2[, 2] + t3
+
+# obtendo tamanho medio dos intervalos
+data.frame(
+  "Região Preditiva" = c("Reg-split", "Weighted", "CQR"),
+  "Largura" = c(
+    mean(upper_bound_rs- lower_bound_rs),
+    mean(upper_bound_w - lower_bound_w),
+    mean(upper_bound_cqr - lower_bound_cqr)),
+  "SE*2" = c(
+    2*sqrt(var(upper_bound_rs - lower_bound_rs)/n_test),
+    2*sqrt(var(upper_bound_w - lower_bound_w)/n_test),
+    2*sqrt(var(upper_bound_cqr - lower_bound_cqr)/n_test)
+  )
+)
+```
+
 \subsection{Item 2}
+```{r}
+sum(y_test>=predito2-t1 & y_test<=predito2+t1)/length(predito2)
+```
+
+```{r}
+sum(y_test>=(predito2-predito4*t2) & y_test<=(predito2+predito4*t2))/length(predito2)
+```
+
+```{r}
+sum(y_test>=(pred_qrf2[,1]-t3) & y_test<=(pred_qrf2[,2]+t3))/length(y_test)
+```
 
 \subsection{Item 3}
+```{r}
+#| label: fig-pred-int-conformal
+#| fig-cap: "Intervalos preditivos conformais para as observações selecionadas. Pontos em vermelho representam o rótulo observado para cada observação."
+#| fig-align: center
+#| fig-pos: '!http'
+#| echo: false
+vals_idx <- c(2, 50, 175, 600, 1250)
+true_y <- y_test[vals_idx]
 
+pred_data <- data.frame(
+  indices = c(paste0("Obs ", rep(vals_idx, 3))),
+  lower_bound = c(
+  lower_bound_rs[vals_idx], 
+  lower_bound_w[vals_idx],
+  lower_bound_cqr[vals_idx]),
+  upper_bound = c(
+    upper_bound_rs[vals_idx],
+    upper_bound_w[vals_idx],
+    upper_bound_cqr[vals_idx]
+    ),
+  truth_values = c(
+    rep(true_y, 3)
+  ),
+  type = c(rep(c("Reg-split", "Weighted", "CQR"), each = 5)))
+
+ggplot(pred_data, 
+  aes(x = indices, ymin = lower_bound, 
+  ymax = upper_bound, color = type)) +
+  geom_linerange(position = position_dodge(width = 0.5), 
+  size = 1) +  # Linhas de intervalo com deslocamento
+  geom_point(aes(y = truth_values), 
+  colour = "red", size = 2, 
+  position = position_dodge(width = 0.5)) +  # Valores verdadeiros
+  labs(
+    title = "Comparação de Regiões Preditivas por Observação",
+    x = "Observação",
+    y = "Rótulo",
+    color = "Método"
+  ) +
+  theme_minimal()
+```
 \subsection{Item 4}
 Para esse exemplo, utilizaremos o conjunto de dados de treino completo. Utilizaremos o pacote BART no R, obtendo uma amostra de $1000$ da posteriori para obter as regiões preditivas para $Y$:
 Agora ajustando o BART:
@@ -138,15 +312,22 @@ pred_data <- data.frame(
   type = c(rep(c("Simétrica", "Quantílica"), each = 5)))
 
 # Plotting the pred_data lower and upper bound
-ggplot(pred_data, aes(x = type, ymin = lower_bound, ymax = upper_bound)) +
-  geom_linerange() +
-  geom_point(aes(y = truth_values), colour = "red") +
-  geom_point(aes(y = mean_values), colour = "blue")+
-  facet_wrap(~ indices, scales = "fixed") +
+ggplot(pred_data, 
+  aes(x = indices, ymin = lower_bound, 
+  ymax = upper_bound, color = type)) +
+  geom_linerange(position = position_dodge(width = 0.5), 
+  size = 1) +  # Linhas de intervalo com deslocamento
+  geom_point(aes(y = truth_values), 
+  colour = "red", size = 2, 
+  position = position_dodge(width = 0.25)) +  # Valores verdadeiros 
+  geom_point(aes(y = mean_values), 
+  colour = "blue", size = 2, 
+  position = position_dodge(width = 0.25)) +
   labs(
-    title = "Regiões Preditivas Estimadas",
-    x = "Tipo de Região",
-    y = "Variável resposta"
+    title = "Comparação de Regiões Preditivas por Observação",
+    x = "Observação",
+    y = "Rótulo",
+    color = "Método"
   ) +
   theme_minimal()
 ```
