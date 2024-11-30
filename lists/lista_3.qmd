@@ -73,34 +73,23 @@ y_train_b <- train_val_data |> pull(1)
 n_test <- nrow(X_test)
 ```
 \subsection{Item 1}
+Para esse item será utilizado o Regression Split, Weighted e CQR como métodos de obtenção de regiões conformes. Para o Regression Split e Weighted, utilizamos o KNN modelo base tanto para a predição pontual $\mathbb{E}[Y|\mathbf{X}]$ quanto para a predição do desvio absoluto médio $\rho(\mathbf{X})$. Já para o CQR utilizamos a regressão quantílica via florestas aleatórias como modelo base para os quantis condicioanis $q_{\alpha/2}(Y|\mathbf{X})$, $q_{1-\alpha/2}(Y|\mathbf{X}$. Em cada método obteve-se os cortes estimados e a largura média das regiões estimadas. Temos então os ajustes:
 
+* Regression Split:
 ```{r}
-# tunando o KNN num grid de K
-# k_grid <- round(seq(1,50,length.out=10))
-
-#erro <- rep(NA,length(k_grid))
-
-#for (ii in seq_along(k_grid)) {
- # predito <- knn.reg(train=X_train_scale,
-  #                 y=y_train,
-   #                k=k_grid[ii])$pred
-  #erro[ii] <- mean((predito-y_train)^2)
-# }
-
-best_k <- 10
-#k_grid[which.min(erro)]
+k <- 10
 
 # predizendo para o conjunto de calibração
 predito1 <- knn.reg(train=X_train_scale,
                   test=X_calib_scale,
                   y=y_train,
-                  k=best_k)$pred
+                  k=k)$pred
 
 # predizendo para o conjunto de teste
 predito2 <- knn.reg(train=X_train_scale,
                   test=X_test_scale,
                   y=y_train,
-                  k=best_k)$pred
+                  k=k)$pred
 
 # calculando o conformal score
 h_rs <- abs(predito1 - y_calib)
@@ -110,12 +99,13 @@ t1 <- quantile(h_rs, probs = 0.95)
 cat("Corte estimado para o Regression Split: ", t1)
 ```
 
+* Weighted:
 ```{r}
 # Estimando o corte para o weighted e rho
 predito31 <- knn.reg(train=X_train_scale,
                    test=X_train_scale,
                    y=y_train,
-                   k=best_k)$pred # E[Y|X](Treinamento)
+                   k=k)$pred # E[Y|X](Treinamento)
 
 # desvio absoluto para estimar o rho
 y_ro <- abs(predito31 - y_train)
@@ -123,7 +113,7 @@ y_ro <- abs(predito31 - y_train)
 predito3 <- knn.reg(train=X_train_scale,
                   test=X_calib_scale,
                   y=y_ro,
-                  k=best_k)$pred #\rho=E[Z|X]
+                  k=k)$pred #\rho=E[Z|X]
 
 # estimando quantil para o conjunto de calibracao
 h_w <- (abs(predito1 - y_calib))/predito3
@@ -133,10 +123,11 @@ t2 <- quantile(h_w, probs = 0.95)
 predito4 <- knn.reg(train=X_train_scale,
                   test=X_test_scale,
                   y=y_ro,
-                  k=best_k)$pred #\rho=E[Z|X]
+                  k=k)$pred #\rho=E[Z|X]
 cat("Corte estimado para o Weighted: ", t2)
 ```
 
+* CQR:
 ```{r}
 #| cache: true
 qrf_model <- quantregForest(
@@ -161,6 +152,7 @@ pred_qrf2 <- predict(qrf_model, newdata =X_test , what = quantis)
 cat("Corte estimado para o CQR: ", t3)
 ```
 
+Cada método possui distintos cortes estimados. Após a estimativa dos cortes, visualizamos as larguras médias de intervalo através da tabela abaixo:
 ```{r}
 # obtendo limitest inferiores e superiores de cada metodo
 # reg-split
@@ -188,20 +180,24 @@ data.frame(
 )
 ```
 
+Apesar de os cortes associados a cada método ser distinto, as larguras médias de cada são razoavelmente próximas, tendo o Regression split uma largura média ligeiramente maior, enquanto o weighted apresenta a menor largura média.  
 \subsection{Item 2}
+Calculamos a cobertura empírica de cada método e armazenamos na tabela abaixo:
 ```{r}
-sum(y_test>=predito2-t1 & y_test<=predito2+t1)/length(predito2)
+cover_rs <- sum(y_test>=predito2-t1 & y_test<=predito2+t1)/length(predito2)
+
+cover_w <- sum(y_test>=(predito2-predito4*t2) & y_test<=(predito2+predito4*t2))/length(predito2)
+
+cover_cqr <- sum(y_test>=(pred_qrf2[,1]-t3) & y_test<=(pred_qrf2[,2]+t3))/length(y_test)
+
+data.frame("Região Preditiva" = c("Reg-split", "Weighted", "CQR"),
+          "Cobertura Empírica" = c(cover_rs, cover_w, cover_cqr))
 ```
 
-```{r}
-sum(y_test>=(predito2-predito4*t2) & y_test<=(predito2+predito4*t2))/length(predito2)
-```
-
-```{r}
-sum(y_test>=(pred_qrf2[,1]-t3) & y_test<=(pred_qrf2[,2]+t3))/length(y_test)
-```
-
+Nota-se que todos os métodos conformais aplicados (Regression Split, Weighted e CQR) possuem coberturas empíricas para o conjunto de  dados analisados muito próximas a $95\%$, com a cobertura estando ao menos um pouco acima do nível nominal pré-specificado. 
 \subsection{Item 3}
+As observações do conjunto de teste escolhidas foram: 2, 50, 175, 600 e 1250.
+Estimamos os intervalos preditivos de cada método para cada obsevação. Podemos comparar as regiões estimadas para as 5 observações selecionadas através do gráfico na [Figura @fig-pred-int-conformal].
 ```{r}
 #| label: fig-pred-int-conformal
 #| fig-cap: "Intervalos preditivos conformais para as observações selecionadas. Pontos em vermelho representam o rótulo observado para cada observação."
@@ -243,11 +239,13 @@ ggplot(pred_data,
   ) +
   theme_minimal()
 ```
+Na [Figura @fig-pred-int-conformal] podemos observar que as regiões estimadas pelo Regression Split contém o verdadeiro valor da variável resposta em todas as observações selecionadas. A região estimada pelo Weighted não contém o verdadeiro valor da variável resposta para a observação 175, mas contém para as demais observações, tendo regiões menores para as observações 2, 50 e 600 e a maior região para a observação 1250. No caso do CQR, as regiões estimadas para todas as observações selecionadas contém o verdadeiro valor da variável respota e os tamanhos em geral são um pouco menor que os do regression-split.
 \subsection{Item 4}
 Para esse exemplo, utilizaremos o conjunto de dados de treino completo. Utilizaremos o pacote BART no R, obtendo uma amostra de $1000$ da posteriori para obter as regiões preditivas para $Y$:
 Agora ajustando o BART:
 ```{r}
 #| cache: true
+#| results: "hide"
 # Set seed for reproducibility
 set.seed(686)
 # Fit BART model
